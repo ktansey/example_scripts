@@ -1,0 +1,447 @@
+---
+title: "DataClinic_Katie_Lewis"
+author: "Katherine Tansey"
+date: "2/10/2017"
+output: html_document
+---
+
+# Introduction
+
+Want to extract all data from weeks prior to the first manic episode for an indvidual
+
+# Data analysis
+Load in the required R packages/libraries
+```{r, results='hide', message=FALSE, warning=FALSE}
+# required packages -- will only install if they are not already installed
+list.of.packages <- c("stringr", "dplyr", "tidyr", "reshape2", "ggplot2", 
+                      "scales", "data.table", "tibble", "readxl", "plyr", "lubridate")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+# loads the required packages
+lapply(list.of.packages, require, character.only = TRUE)
+```
+
+Set working directory for my computer
+```{r}
+# set working 
+setwd('/Users/katherine/Documents/Data_Clinic_Work/Katie_Lewis/')
+
+```
+
+## Load in Altman data
+Loading in from excel sheet. Need to manipulate the data to set the first row as the column names, and then delete the first row. 
+Remove the column that identifies the questionnaire type, as we are going to change the names of the vairable to have the questionnaire type in there. 
+```{r}
+# read in Altman data
+alt <- read_excel("QIDS_Altman_WeeklyScores.xlsx", sheet = 2)
+
+# make first row the column names
+colnames(alt) <- alt[2,]
+
+# remove spurious row and column
+alt <- alt[c(-1:-2),c(-2)]
+```
+
+Create new column names, so that summary and q# all start with Alt_ to identify the questionnaire the information came from. Then reset the first two column names to remove the Alt_ from them.
+```{r}
+# change variable names to start with Alt
+colnames(alt) <- paste("Alt", colnames(alt), sep = "_")
+# fix names for col 1 and 2
+colnames(alt)[1] <- "Sample"
+colnames(alt)[2] <- "DateTime"
+```
+
+Split Date and Time into two different columns. For the moment, Time will be ignored and only Date will be focused on. Date is convert into a Date type variable column. 
+```{r}
+# split date time column into date and time
+alt <- alt %>%
+    separate(DateTime, into = c("Date", "Time"), sep="T") %>%
+    separate(Time, into = c("Time", "daylightsavings"), sep="\\+")
+
+# convert Date/Time received to date and time column
+# update time to be GMT taking into account day light savings that occurred
+alt$Date <- ymd(alt$Date)
+alt$Time <- hms(alt$Time)
+alt$daylightsavings <- hm(alt$daylightsavings)
+alt$GMT <- alt$Time + alt$daylightsavings
+alt$GMT <- as.numeric(alt$GMT)
+# remove unwanted columns
+alt <- subset(alt, select = -c(Time, daylightsavings))
+
+# look at file
+colnames(alt)
+head(alt, n=3L)
+```
+
+The data for the summary is not recognized as a number, so convert the data type to numeric.
+```{r}
+# make the total (summary) column numeric and not a factor
+alt[,grep("^Alt",colnames(alt))] <- as.numeric(as.matrix(alt[,grep("^Alt",colnames(alt))]))
+#alt$Alt_summary <- as.numeric(alt$Alt_summary)
+```
+
+Remove entries that occur on the same date or within the same week (?).
+For some people, they have filled out the form more than once in a day. For others, the time between entries is less than a week (sometimes only 1 or 2 days apart)
+```{r}
+#alt$day <- wday(alt$Date, label=TRUE)
+
+# get the difference in days between entries
+alt <- as.data.frame(alt %>%
+                          arrange(Sample, Date, GMT) %>%
+                          group_by(Sample) %>%
+                          mutate(diff_day = ifelse( (Sample == lag(Sample)), 
+                                                    (Date - lag(Date)), 
+                                                    NA  ) ,  
+                                 # can change this to alter the number of days required between entries
+                                 same_week = ifelse( ( (diff_day < 4) & diff_day >=0  ), 
+                                                     ifelse(Date > lag(Date), 1,
+                                                            ifelse(GMT > lag(GMT) , 1 , 0 ) ), 0 ) )   %>%
+                          filter(same_week == 0 | is.na(same_week)) %>%
+                         # remove diff_day and same_week
+                          select(-c(diff_day, same_week)) %>%
+                         # create new_diff_day to account for the response passing filtering step
+                          mutate(new_diff_day_alt = ifelse( (Sample == lag(Sample)), 
+                                                    (Date - lag(Date)), 
+                                                    NA ) )
+                     )
+
+
+#test105 <-  as.data.frame(test %>%
+#                              filter(Sample == 10) )
+
+#alt105 <- as.data.frame(alt %>%
+#                            filter(Sample == 10)   %>%
+#                          arrange(Date, GMT) %>%
+#                          mutate(diff_day = Date - lag(Date)  ,
+#                                    same_week = ifelse((diff_day < 4 & diff_day >=0),1,0) )  )
+```
+
+## Load in QIDS data
+Loading in from excel sheet. Need to manipulate the data to set the first row as the column names, and then delete the first row. 
+Remove the column that identifies the questionnaire type, as we are going to change the names of the vairable to have the questionnaire type in there. 
+```{r}
+# read in qids
+qids <- read_excel("QIDS_Altman_WeeklyScores.xlsx", sheet = 3)
+
+# make first row the column names
+colnames(qids) <- qids[2,]
+
+# remove spurious row and column
+qids <- qids[c(-1:-2),c(-2)]
+```
+
+Create new column names, so that summary and q# all start with QIDS_ to identify the questionnaire the information came from. Then reset the first two column names to remove the QIDS_ from them.
+```{r}
+# change variable names to start with Alt
+colnames(qids) <- paste("QIDS", colnames(qids), sep = "_")
+# fix names for col 1 and 2
+colnames(qids)[1] <- "Sample"
+colnames(qids)[2] <- "DateTime"
+```
+
+Split Date and Time into two different columns. For the moment, Time will be ignored and only Date will be focused on. Date is convert into a Date type variable column. 
+```{r}
+# split date time column into date and time
+qids <- qids %>%
+    separate(DateTime, into = c("Date", "Time"), sep="T") %>%
+    separate(Time, into = c("Time", "daylightsavings"), sep="\\+")
+
+# convert Date/Time received to date and time column
+# update time to be GMT taking into account day light savings that occurred
+qids$Date <- ymd(qids$Date)
+qids$Time <- hms(qids$Time)
+qids$daylightsavings <- hm(qids$daylightsavings)
+qids$GMT <- qids$Time + qids$daylightsavings
+qids$GMT <- as.numeric(qids$GMT)
+# remove unwanted columns
+qids <- subset(qids, select = -c(Time, daylightsavings))
+
+# look at file
+colnames(qids)
+head(qids, n=3L)
+```
+
+The data for the summary is not recognized as a number, so convert the data type to numeric.
+```{r}
+# make the total (summary) column numeric and not a factor
+qids[,grep("^QIDS",colnames(qids))] <- as.numeric(as.matrix(qids[,grep("^QIDS",colnames(qids))]))
+#qids$QIDS_summary <- as.numeric(qids$QIDS_summary)
+```
+Remove entries that occur on the same date or within the same week (?).
+For some people, they have filled out the form more than once in a day. For others, the time between entries is less than a week (sometimes only 1 or 2 days apart)
+```{r}
+#alt$day <- wday(alt$Date, label=TRUE)
+
+# get the difference in days between entries
+qids <- as.data.frame(qids %>%
+                          arrange(Sample, Date, GMT) %>%
+                          group_by(Sample) %>%
+                          mutate(diff_day = ifelse( (Sample == lag(Sample)), 
+                                                    (Date - lag(Date)), 
+                                                    NA ),
+                                 same_week = ifelse( ( (diff_day < 4) &
+                                                           diff_day >=0 ), 
+                                                     ifelse(Date > lag(Date), 1,
+                                                            ifelse(GMT > lag(GMT) , 
+                                                                   1, 0)), 0)) %>%
+                          filter(same_week == 0 | is.na(same_week)) %>%
+                          select(-c(diff_day, same_week)) %>%
+                          mutate(new_diff_day_qids = ifelse( (Sample == lag(Sample)), 
+                                                    (Date - lag(Date)), 
+                                                    NA ) )
+                     )
+#test105 <-  as.data.frame(test %>%
+#                              filter(Sample == 105) )
+
+#qids105 <- as.data.frame(qids %>%
+#                            filter(Sample == 105) %>%
+#                          arrange(Date, GMT) %>%
+#                          mutate(diff_day = Date - lag(Date) ,
+#                                    same_week = ifelse((diff_day < 4 & diff_day >=0),1,0) ) )
+```
+
+## Merge 
+Merge the two datasets (alt, qids) into one data frame object.
+```{r}
+# merge datasets to together
+pheno <- merge(alt, qids, by=c("Sample", "Date"))
+
+# look at file
+colnames(pheno)
+head(pheno, n=3L)
+```
+
+## Create new dataframes
+Loop creates two different dataframes:      
+
+    1. A list of weeks and episode number for each person      
+    2. All the pheno information for the weeks prior to the first episode for each person       
+
+Info from Katie Lewis (email 21/2/2017) :  
+
+    * Episodes:  
+        + do not concatenate above threshold scores with weeks that have missing data  
+        + be stringent - above-threshold scores have to be in consecutive weeks  
+    * Pre-illness period:  
+        + 4 weeks prior to the episode but may have to expand in the future  
+        + skip to **NEXT** episode if participant starts above threshold  
+        + select prior 4 weeks where participant does not have any scores that are above threshold  
+        
+Email for Katie Lewis (email 22/2/2017):
+
+    * data from people who are above 5 in the preceding weeks could be put into a separate data set and then compared to those who are below threshold 
+    
+TO CHANGE:
+skip to **NEXT** episode if participant starts above threshold  
+Skip to **NEXT** episode if there are less than 4 weeks of prior information
+
+### Altman 
+```{r}
+# get a list of all the individuals in the data
+ppl <- unique(na.omit(pheno$Sample))
+
+# create empty lists to populate the loop output into
+output_episodes <- list()
+output_prior <- list()
+output_prior_nogood <- list()
+output_all_prior_dates <- list()
+output_during <- list()
+output_all_after_dates <- list()
+output_episode_number <- list()
+
+# this is a HORRIBLE loop code
+
+# need at least between 4 and 7 for the analysis
+for(i in ppl){
+    
+    # extract out all the data for that person into new dataframe
+    tmp <- pheno[which(pheno$Sample == i), ]
+    
+    # create a variable for week
+    # make week a consecutive count for all week
+    # unless the responses are more than 10 days apart then set to 2 weeks difference
+    tmp$week[order(tmp$Date)] <- 1:nrow(tmp)
+    
+ #   for(num in 1:nrow(tmp)){
+ #       if(num == 1) {
+ #           tmp[num, "week"] <- 1
+ #           tmp[num, "new_diff_day_alt"] <- 1
+ #       } else {
+ #           week_multipler <- ceiling( (tmp[num, "new_diff_day_alt"] - tmp[num-1, "new_diff_day_alt"]) /10 )
+ #           if(week_multipler <= 0 ) {
+ #               week_multipler <- 1
+ #           }
+ #       }
+ #           tmp[num, "week"] <- tmp[num-1, "week"] + week_multipler
+ #   }
+    
+    # subset data to only include those rows with Alt greater than 5
+    # and only columns of interest
+    # for QIDS change to Qids_summary, and change threshold 
+    data2 <- tmp[which(tmp$Alt_summary > 5), 
+                 c("Sample", "Date", "Alt_summary","week") ]
+    
+    if(nrow(data2) > 1) {
+        # cluster the rows creating a letter for each episode
+        # changed this to have 4 week below threshold weeks for them to be 
+        # different episodes
+        data3 <- data.frame(data2, 
+                            episode = letters[cumsum(c(1L, diff(data2$week) > 4L))])
+     
+        # keep only the rows with more than one letter (so episodes)
+        # to change for QIDS -- alter the filter to be n()>2
+        # which will select only those episodes with more than 2 occurances
+        data4 <- as.data.frame(data3 %>% 
+                    group_by(episode) %>% 
+                    filter(n()>1))
+        
+        # convert episode to number
+        data4$episode <- as.numeric(data4$episode)
+        
+        # get number of episodes
+        number_of_episodes <- length(unique(data4$episode))
+        output_episode_number[[i]] <- number_of_episodes
+        
+        # select all the date for this person prior to the date of their first episode
+        # get the start and end week for each episode
+        date_episode_start_ends <- as.data.frame(data4 %>%
+            arrange(week) %>%
+            group_by(episode) %>%
+            mutate(first = lead(week, n=0, order_by=week), 
+                previous_end = lag(week, order_by=week),
+                time_between_episodes = (first - previous_end)-1) %>%
+            slice(1) )
+    
+        # output
+        # (1) output a list of episodes for each person
+        output_episodes[[i]] <- date_episode_start_ends
+        
+        if(nrow(date_episode_start_ends) > 1 && min(date_episode_start_ends$first) <= 4) {
+            # select the first episode where time_between_episodes is greater than 4
+            # so there is more than 4 weeks between the episodes
+            # keep only the DATE when that episode started
+            epi_start_date <- as.list(date_episode_start_ends %>% 
+                filter(time_between_episodes >= 4 ) %>%  
+                filter(row_number() == 1)  %>%
+                select(Date))
+            
+            epi_end_date <- as.list(date_episode_start_ends %>% 
+                filter(Date > epi_start_date ) %>%  
+                filter(row_number() == 1)  %>%
+                select(previous_end))
+            
+        } else {
+            # used the first episode to get the prior 4 weeks of data
+            epi_start_date <- as.list(date_episode_start_ends %>% 
+                filter(time_between_episodes >= 4 ) %>%  
+                filter(row_number() == 1)  %>%
+                select(Date))
+            
+            epi_end_date <- as.list(date_episode_start_ends %>% 
+                filter(Date > epi_start_date ) %>%  
+                filter(row_number() == 1)  %>%
+                select(previous_end))
+        }
+    
+        # get all information for before the episode began
+        tmp_date_before  <- tmp[which(tmp$Date < epi_start_date),] 
+        output_all_prior_dates[[i]] <- tmp_date_before
+        
+        # get information for during the episode
+        # convert end of episode from week number to Date
+        epi_end_date_date <- tmp[which(tmp$week == epi_end_date), "Date"]
+        tmp_during  <- tmp[which( (tmp$Date >= epi_start_date & tmp$Date <= epi_end_date_date) ) ,] 
+        output_during[[i]] <- tmp_during
+        
+        # get all information for after an episode
+        tmp_date_after  <- tmp[which( (tmp$Date > epi_end_date_date) ) ,] 
+        output_all_after_dates[[i]] <- tmp_date_after
+        
+        # remove prior weeks that are NA
+        #tmp_date <- tmp[which(!is.na(tmp$Date < data4[1, "Date"])),]
+
+        # select the 4 weeks prior to episode
+        # people must have at least 4 weeks of prior information to be included
+        if(nrow(tmp_date_before) >= 4){
+            tmp_date_sub <- tmp_date_before[(nrow(tmp_date_before)-3):nrow(tmp_date_before),]
+
+            # create a variable for prior_week_num
+            # make prior_week_num a consecutive count for all prior_week_num
+            # this is to make it easier to translate the data to wide format
+            tmp_date_sub$prior_week_num[order(tmp_date_sub$Date)] <- 1:nrow(tmp_date_sub)
+        
+            # if any of those weeks are above threshold
+            # for QIDS change to Qids_summary and change threshold
+            if(any(tmp_date_sub$Alt_summary > 5, na.rm=TRUE )) {
+                # output 
+                # (2) output the prior information for each person
+                output_prior_nogood[[i]] <- tmp_date_sub
+            } else {
+                # output 
+                # (2) output the prior information for each person
+                output_prior[[i]] <- tmp_date_sub
+            }
+        }
+    }
+}
+
+# run this to rbind together all the individual output from the loop
+episodes <- do.call(rbind, output_episodes)
+prior_data <- do.call(rbind, output_prior)
+prior_nogood <- do.call(rbind, output_prior_nogood)
+all_prior_dates <- do.call(rbind, output_all_prior_dates)
+during <- do.call(rbind, output_during)
+all_after_dates <- do.call(rbind, output_all_after_dates)
+episode_number <- do.call(rbind, output_episode_number)
+```
+
+Now have three dataframes:
+
+    > episodes
+    > prior_data
+    > prior_nogood
+    > all_prior_dates 
+    > during 
+    > all_after_dates 
+    > episode_number 
+    
+episodes : all the weeks for which each person is having a manic episode (two or more weeks in a row over 5). This does not take into account missing week information.    
+    
+prior_data : All information for the 4 weeks prior to the first manic episode for each person where none of the summary scores go above the threshold.   
+
+prior_nogood : All information for the 4 weeks prior to the start of first manic episode for each person where at least one week has a summary score above the threshold. 
+
+all_prior_dates : All information prior to the start of first manic episode for each person where none of the summary scores go above the threshold.  
+
+during : 
+
+all_after_dates : All information after to the end of the first manic episode for each person where none of the summary scores go above the threshold.
+
+episode_number : Number of episodes per person
+
+```{r}
+prior_all <- rbind(prior_data, prior_nogood)
+
+#write.table(episodes, file="NAME_OF_FILE.csv", sep=",", row.names = F, col.names = T)
+#write.table(prior_data, file="NAME_OF_FILE.csv", sep=",", row.names = F, col.names = T)
+#write.table(prior_nogood, file="NAME_OF_FILE.csv", sep=",", row.names = F, col.names = T)
+```
+
+Data needs to be in wide format and not long. Meaning one row person, data for each week prior to episode included in the column name counting up. 1 is the fourth week prior to episode, and 4 is the week before the episode began.    
+
+```{r}
+drop  <- c("Time.x", "Time.y", "Date", "week")
+prior_data <- prior_data[, !(names(prior_data) %in% drop)]
+
+prior_data_wide <- reshape(prior_data, timevar = "prior_week_num",
+                           idvar = "Sample", direction = "wide", 
+                           sep = "_")
+```
+
+```{r}
+#write.table(prior_data_wide, file="NAME_OF_FILE.csv", sep=",", row.names = F, col.names = T)
+```
+
+
+### QIDS

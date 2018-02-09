@@ -1,0 +1,209 @@
+---
+title: "ldscore microglia TF"
+author: "Katherine Tansey"
+date: "21 January 2018"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+Sanity checking the results because the enrichment and ldscore for microglia in the TFs is looking a bit messy. 
+
+Data is bed files (chr, start, stop) with one for each TF found  in the HOMER de novo analysis (there are 20 )
+
+# extend peaks
+
+```{r, eval = FLASE}
+module load bedtools/2.26.0
+
+for j in Bcell BORIS BREu CEBPE DCE E2F6 Etv2 Fra1 HINFP IRF2 Mef2a RUNX Sfpi1 SP1 Spdef SPI1 Srf TFs_noAnns Usf2 Zfp281
+do 
+bedtools slop -i ${j}_matt_sorted.bed -g /scratch/mpnkt/reference_data/human_hg19/chromo_lengths -b 500 > ${j}_ext500.bed
+
+done
+
+```
+
+# Convert bed to annot
+
+
+Convert peaks to LD.annot file
+*NOTE*: have to be in the baseline folder for this script to work properly....  
+saved as make_annot.sh  in /scratch/mpnkt/Matthew_Hill_microglia/bin
+```{r, eval = FALSE}
+#!/bin/bash
+#PBS -l select=1:mem=30gb
+#PBS -l walltime=24:00:00
+#PBS -q workq_wgp
+#PBS -N make_annot
+#PBS -m e
+#PBS -M tanseyk@cardiff.ac.uk
+#PBS -P PR341
+#PBS -o OUT/
+#PBS -e ERR/
+
+
+module load bedtools/2.26.0
+
+cd /scratch/mpnkt/ldsc_phase1/baseline
+
+WORKD="/scratch/mpnkt/Matthew_Hill_microglia/ldscore_TFs"
+
+for j in Bcell BORIS BREu CEBPE DCE E2F6 Etv2 Fra1 HINFP IRF2 Mef2a RUNX Sfpi1 SP1 Spdef SPI1 Srf TFs_noAnns Usf2 Zfp281
+do     
+for f in /scratch/mpnkt/ldsc_phase1/baseline/*.annot.gz
+do
+    NAME=$(echo ${f} | awk -F "/" '{print $6}' | awk -F ".gz" '{print $1}')
+    
+    echo ${NAME}
+    
+    gunzip ${NAME}.gz
+    
+    #remove header from annotation file, convert to bed and sort file
+    tail -n +2 ${NAME} | awk '{print "chr"$1 "\t" $2 "\t" $2+1 "\t" $3 "\t" $4}' | sort -k1,1 -k2,2n > ${NAME}_no_head.sorted.bed
+ 
+    #intersect with chip-seq bed file
+    intersectBed -a ${NAME}_no_head.sorted.bed -b ${WORKD}/${j}_ext500.bed  -c > ${WORKD}/tmp1_${NAME}
+             
+    #reformat bed into LD score format
+     sed 's/^chr//g' ${WORKD}/tmp1_${NAME} | awk '{print $1"\t", $2"\t", $4"\t", $5"\t", $6}' > ${WORKD}/tmp2_${NAME}
+ 
+    echo -e "CHR\tBP\tSNP\tCM\t""SP1" | cat - ${WORKD}/tmp2_${NAME} > ${WORKD}/${j}_${NAME}
+    
+    wc ${NAME}
+    wc ${WORKD}/${j}_${NAME}
+    
+    rm ${WORKD}/tmp1_${NAME}
+    rm ${WORKD}/tmp2_${NAME}
+    rm ${NAME}_no_head.sorted.bed
+    
+    gzip ${WORKD}/${j}_${NAME}
+    gzip ${NAME}
+    
+done
+done
+
+```
+
+
+
+# create ld files
+
+save as : create_ld_files.sh
+in : /scratch/mpnkt/Matthew_Hill_microglia/bin
+```{r, eval = FALSE}
+#!/bin/bash
+#PBS -l select=1:mem=20gb
+#PBS -l walltime=24:00:00
+#PBS -q workq_wgp
+#PBS -N ldscore_build
+#PBS -m e
+#PBS -M tanseyk@cardiff.ac.uk
+#PBS -P PR341
+#PBS -o OUT/
+#PBS -e ERR/
+
+module load ldsc/latest
+
+for i in {1..22}
+    do
+    ldsc.py --l2 --bfile /scratch/mpnkt/ldsc_phase1/1000G_plinkfiles/1000G.mac5eur.${i} --ld-wind-cm 1  --print-snps /scratch/mpnkt/ldsc_phase1/hapmap3_snps/hm.${i}.snp --annot /scratch/mpnkt/Matthew_Hill_microglia/ldscore_TFs/Zfp281_baseline.${i}.annot.gz --out /scratch/mpnkt/Matthew_Hill_microglia/ldscore_TFs/Zfp281_baseline.${i}
+
+done
+```
+
+
+# run ld score
+
+save as : create_ld_files.sh
+in : /scratch/mpnkt/Matthew_Hill_microglia/bin
+```{r, eval = FALSE}
+#!/bin/bash
+#PBS -l select=1:mem=20gb
+#PBS -l walltime=24:00:00
+#PBS -q workq_wgp
+#PBS -N ldscore 
+#PBS -m e
+#PBS -M tanseyk@cardiff.ac.uk
+#PBS -P PR341
+
+module load ldsc/latest
+
+for j in Bcell BORIS BREu CEBPE DCE E2F6 Etv2 Fra1 HINFP IRF2 Mef2a RUNX Sfpi1 SP1 Spdef SPI1 Srf TFs_noAnns Usf2 Zfp281
+do 
+
+ldsc.py  --h2  /scratch/mpnkt/Matthew_Hill_microglia/SP1_ldscore/IGAP_stage_1.sumstats.gz --ref-ld-chr /scratch/mpnkt/ldsc_phase1/baseline/baseline.,/scratch/mpnkt/Matthew_Hill_microglia/ldscore_TFs/${j}_baseline. --w-ld-chr /scratch/mpnkt/ldsc_phase1/weights_hm3_no_hla/weights. --overlap-annot --frqfile-chr /scratch/mpnkt/ldsc_phase1/1000G_frq/1000G.mac5eur.  --out /scratch/mpnkt/Matthew_Hill_microglia/ldscore_TFs/${j}_500ext --print-coefficients
+
+done 
+```
+
+# R analysis  
+
+
+```{r, eval=FALSE}
+
+### do this for every folder to one results file. 
+for i in   Bcell BORIS BREu CEBPE DCE E2F6 Etv2 Fra1 HINFP IRF2 Mef2a RUNX Sfpi1 SP1 Spdef SPI1 Srf TFs_noAnns Usf2 Zfp281
+do
+    foo="$(grep _1 ${i}_500ext.results) "
+    echo $i "$foo" >> AD_TF_ldscore
+done
+```
+
+
+```{r}
+library(stringr)
+library(reshape2)
+library(ggplot2)
+library(dplyr)
+library(knitr)
+library(grid)
+
+# Load the names of all the cell types in
+cell_types <- read.table("/Users/katherine/Dropbox/ldsc/cell_types.txt", h=T)
+cell_types$Cell_Marks = paste(cell_types$cell_type, cell_types$mark, sep="_")
+names(cell_types)[names(cell_types)=="file_number"] <- "NUMBER"
+cell_types_1 <- cell_types[,c(1,4)]
+```
+
+## AD -- TF
+
+```{r}
+AD_TF <- read.table("/Users/katherine/Documents/Data_Clinic_Work/Matthew_Hill/microgilia/ldscore_TF/AD_TF_ldscore")
+
+names(AD_TF) <- c("TF", "Category", "Prop._SNPs", "Prop._h2", "Prop._h2_std_error", "Enrichment", "Enrichment_std_error", "Enrichment_p", "Coefficient", "Coefficient_std_error", "Coefficient_zscore")
+
+AD_TF$pvalue <- ifelse(AD_TF$Coefficient_zscore > 0,
+                              2*pnorm(-abs(AD_TF$Coefficient_zscore)),
+                               1-(2*pnorm(-abs(AD_TF$Coefficient_zscore))))
+
+
+AD_TF$neglog10p <- -log10(AD_TF$pvalue)
+
+sig = -log10(0.05/nrow(AD_TF))
+
+### multiple correction line
+print(sig)
+```
+
+
+Blue colored bars are the cell marks of interest.  
+```{r, echo=FALSE, fig.width=7, fig.height=20}
+ggplot(AD_TF,  aes(TF, neglog10p)) +
+    geom_bar(stat = "identity") +
+    coord_flip() +
+    theme_bw() +
+    theme(axis.text.x = element_text(vjust=1, hjust=1, size=10),
+          axis.text.y = element_text(size=7),
+          legend.position="none")+
+    xlab("Category") +
+    geom_hline(yintercept=sig, color="red") +
+    ylab("-log10 P-value")
+```
+
+```{r, echo=FALSE}
+### make table for top results
+kable(AD_TF %>%
+    select(label, Prop._SNPs, Prop._h2, Coefficient_z.score, pvalue, neglog10p) %>%
+    arrange(pvalue))
+```
+

@@ -1,0 +1,548 @@
+---
+title: "Updated AD manuscript figures"
+author: "Katherine Tansey"
+date: "21 January 2018"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+# Introduction
+Code include are for making the 4 figures included in the AD SNP Enrichment paper written with Matthew Hill
+
+All figures need to be 300dpi and pdf
+
+Only need to update Figures 2,3,4. Figure 1 can stay as it is (code for that is in /Users/katherine/Dropbox/AD_SNP_enrichment/data_and_code/Manuscript_Figures.Rmd).     
+
+## Load libraries needed
+```{r}
+getRversion()    
+
+# required packages -- will only install if they are not already installed
+list.of.packages <- c("plyr", "tidyverse", "ggplot2", "stringr", "scales", "gridExtra", "grid", "cowplot")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+# loads the required packages
+lapply(list.of.packages, require, character.only = TRUE)
+```
+
+Set working directory
+```{r}
+#setwd("D:/Matt's documents/SNP_enrichment/AD/roadmap_dnase/data_for_new_graph")
+#setwd("/Users/katherine/Dropbox/AD_SNP_enrichment/data_and_code/")
+setwd("/Users/katherine/Documents/Data_Clinic_Work/Matthew_Hill/microgilia/")
+```
+
+
+
+# Figure 2
+Caption:
+
+    Overlap between genome-wide significant AD risk variants and DNase hypersensitivity sites identified in monocyte and macrophage samples, data from the BLUEPRINT Epigenome project. AD risk variants and 10,000 sets of matched SNPs were intersected with DNase hypersensitivity sites, z-scores were calculated for the AD risk variants set for each tissue type. X axis is the z-score and the Y axis the cell type. Box plots indicate the distribution of overlap from the 10,000 background matched SNP sets. Red circles are the z-scores for the AD risk variants set . P values were calculated from the observed overlap of the 10,000 background matched SNP sets. P values have been corrected for 24 tests. *** P < 0.005, ** P < 0.01, * P < 0.05. 
+
+Box plot with x-axis is z-scores and y-axis is BLUEPRINT ID.
+
+## get data in order
+```{r}
+# monocyte and macrophage data
+data <- read.table('/Users/katherine/Dropbox/AD_SNP_enrichment/data_and_code/AD_results_dnase_blueprint_all_with_names_for_R.txt', header=TRUE)
+
+data <- select(data, -description, -X_merge, -monocyte, -macrophage)
+
+head(data)
+```
+
+Need to calculate a zscore for each snp set for the individual donor microglia data.
+```{r}
+setwd("/Users/katherine/Documents/Data_Clinic_Work/Matthew_Hill/microgilia/microglia_resulsts/results/")
+
+filenames <- list.files(pattern=glob2rx("*_sort_markdup_qced_sorted_locus_results.txt"))
+microglia <- list()
+
+for (i in 1:length(filenames)) {
+    microglia[[i]] <- read.table(filenames[i])
+}
+
+microglia2 <- list()
+
+for (i in 1:length(microglia)) {
+    microglia2[[i]] <- microglia[[i]]  %>%
+        group_by(V3) %>%
+        dplyr::summarise(n = n()) %>%
+        ungroup() %>%
+        complete(V3 = seq(from = 1, to = 10001, by = 1), fill = list(n = 0) ) %>%
+        mutate(snp_set = ifelse(V3 == 1, 1, 2), 
+               quick_cat = "Microglia") %>%
+        mutate(zscore = ( n - mean(n) ) / sd(n)) %>%
+        filter(snp_set == 2) %>%
+        select(snp_set, quick_cat, zscore)
+}
+
+microglia1 <- list()
+for (i in 1:length(microglia)) {
+    microglia1[[i]] <- microglia[[i]]  %>%
+        group_by(V3) %>%
+        dplyr::summarise(n = n()) %>%
+        ungroup() %>%
+        complete(V3 = seq(from = 1, to = 10001, by = 1), fill = list(n = 0) ) %>%
+        mutate(snp_set = ifelse(V3 == 1, 1, 2)) %>%
+        group_by(snp_set) %>%
+        dplyr::summarise(mean1 = mean(n, na.rm=TRUE),
+                  sd1 = sd(n, na.rm = TRUE) )  %>%
+        mutate(zscore = (mean1 - lead(mean1)) / lead(sd1), 
+               quick_cat = "Microglia") %>%
+        filter(snp_set == 1) %>%
+        select(snp_set, quick_cat, zscore) 
+}
+
+names(microglia1) <- sapply(strsplit(filenames,"_"), `[`, 1)
+names(microglia2) <- sapply(strsplit(filenames,"_"), `[`, 1)
+
+micro1 <- ldply(microglia1)
+micro2 <- ldply(microglia2)
+
+names(micro1) <-  c("cell_id", "snp_set", "quick_cat", "z_score")
+names(micro2) <-  c("cell_id", "snp_set", "quick_cat", "z_score")
+
+micro_results <- full_join(micro1, micro2)
+
+data2 <- full_join(data, micro_results)
+```
+
+
+```{r}
+data_snp_set_1 = subset(data2, snp_set == 1)
+data_snp_set_1_ordered = data_snp_set_1[order(data_snp_set_1$z_score),]
+data_snp_set_other = subset(data2, snp_set != 1)
+
+data_snp_set_1_ordered$label <- paste(data_snp_set_1_ordered$cell_id, 
+                              sprintf("%.3f", round(data_snp_set_1_ordered$z_score, digits=3)), sep = "    ")
+
+data_snp_set_1_sub <- select(data_snp_set_1_ordered, cell_id, z_score)
+
+bad <- inner_join(data_snp_set_1_sub, data_snp_set_other, by="cell_id")
+
+offset = 0.2
+cbbPalette <- c("#009E73", "#0072B2", "#D55E00")
+
+
+#####################
+tiff("Figure_2.tiff", height = 10, width = 20, units = 'cm', 
+     compression = "lzw", res = 300)
+
+ADplot <- ggplot(data = bad,
+                 aes(x = reorder(cell_id, z_score.x),
+                     y = z_score.y,
+                     fill = quick_cat ) ) +
+    stat_boxplot(geom = 'errorbar',
+                 width = 0.25) +
+    geom_boxplot(width = 0.35,
+                 outlier.shape = NA) +
+    geom_point(data = data_snp_set_1_ordered,
+               aes(x= cell_id,
+                   y = z_score),
+               colour = "red",
+               size = 1.5,
+               show.legend = FALSE) +
+    ylab("Z score") +
+    xlab("Cell") +
+    scale_fill_manual(values=c("#009E73", "#56B4E9", "#D55E00"),
+                       breaks=c("Macrophage", "Microglia", "Monocyte"),
+                       labels=c("Macrophage\nDNase-seq", "Microglia\nATAC-seq", "Monocyte\nDNase-seq")
+                      ) + 
+    guides(fill = guide_legend(title = NULL)) +
+    annotate("text", x = 35, y = data_snp_set_1_ordered[35,"z_score"] + offset, label = "***", size = 3, hjust = 0) +
+    annotate("text", x = 34, y = data_snp_set_1_ordered[34,"z_score"] + offset, label = "**", size = 3, hjust = 0) +
+    annotate("text", x = 33, y = data_snp_set_1_ordered[33,"z_score"] + offset, label = "**", size = 3, hjust = 0) +
+    annotate("text", x = 32, y = data_snp_set_1_ordered[32,"z_score"] + offset, label = "***", size = 3, hjust = 0) +
+    annotate("text", x = 31, y = data_snp_set_1_ordered[31,"z_score"] + offset, label = "***", size = 3, hjust = 0) +
+    annotate("text", x = 30, y = data_snp_set_1_ordered[30,"z_score"] + offset, label = "*", size = 3, hjust = 0) + 
+    annotate("text", x = 29, y = data_snp_set_1_ordered[29,"z_score"] + offset, label = "*", size = 3, hjust = 0) + 
+    annotate("text", x = 28, y = data_snp_set_1_ordered[28,"z_score"] + offset, label = "***", size = 3, hjust = 0) +
+    annotate("text", x = 27, y = data_snp_set_1_ordered[27,"z_score"] + offset, label = "***", size = 3, hjust = 0) +
+    annotate("text", x = 26, y = data_snp_set_1_ordered[26,"z_score"] + offset, label = "***", size = 3, hjust = 0) +
+    annotate("text", x = 25, y = data_snp_set_1_ordered[25,"z_score"] + offset, label = "**", size = 3, hjust = 0) +
+    annotate("text", x = 24, y = data_snp_set_1_ordered[24,"z_score"] + offset, label = "*", size = 3, hjust = 0) +
+    annotate("text", x = 23, y = data_snp_set_1_ordered[23,"z_score"] + offset, label = "**", size = 3, hjust = 0) +
+    annotate("text", x = 22, y = data_snp_set_1_ordered[22,"z_score"] + offset, label = "*", size = 3, hjust = 0) +
+    annotate("text", x = 21, y = data_snp_set_1_ordered[21,"z_score"] + offset, label = "*", size= 3, hjust = 0) +
+    annotate("text", x = 20, y = data_snp_set_1_ordered[20,"z_score"] + offset, label = "***", size = 3, hjust = 0) +
+    annotate("text", x = 19, y = data_snp_set_1_ordered[19,"z_score"] + offset, label = "*", size = 3, hjust = 0) +
+    annotate("text", x = 18, y = data_snp_set_1_ordered[18,"z_score"] + offset, label = "*", size = 3, hjust = 0) +
+    annotate("text", x = 17, y = data_snp_set_1_ordered[17,"z_score"] + offset, label = "*", size = 3, hjust = 0) +
+    annotate("text", x = 16, y = data_snp_set_1_ordered[16,"z_score"] + offset, label = "*", size = 3, hjust = 0) +
+    annotate("text", x = 14, y = data_snp_set_1_ordered[14,"z_score"] + offset, label = "*", size = 3, hjust = 0) +
+    annotate("text", x = 13, y = data_snp_set_1_ordered[13,"z_score"] + offset, label = "*", size = 3, hjust = 0) +
+    annotate("text", x = 11, y = data_snp_set_1_ordered[11,"z_score"] + offset, label = "*", size= 3, hjust = 0) +
+    #annotate("text", x = 10, y = data_snp_set_1_ordered[10,"z_score"] + offset, label = "*", size= 3, hjust = 0) +
+    coord_flip() +
+    scale_x_discrete(labels = data_snp_set_1_ordered$label) +
+    theme(axis.line.x = element_line(color = "black", size = 0.5),
+          axis.line.y = element_line(color = "black", size = 0.5),
+          panel.background = element_blank(),
+          #axis.text.x  = element_text(size=rel(0.8), color = "black"),
+          axis.text.y  = element_text(size=rel(0.7), color = "black"),
+          #axis.title.x = element_text(size = rel(1.2)),
+          #axis.title.y = element_text(size = rel(1.2)),
+          #legend.text=element_text(size= rel(1.25)), 
+          plot.margin=unit(c(1,0.5,0.5,0.5), "cm"),
+          legend.text = element_text(size = 8), 
+          #legend.key = element_rect(size = 5),
+          legend.key.size = unit(1.5, 'lines')
+    )
+
+
+# Create the textGrobs
+newplot = ADplot + annotation_custom(grob = textGrob(label = "ID", hjust = 0, gp = gpar(cex = 0.5, fontsize=14)), 
+                                     xmin = 36.2, xmax = 36.2, ymin = -4.7, ymax = -4.7) +
+    annotation_custom(grob = textGrob(label = "z-score", hjust = 0, gp = gpar(cex = 0.5, fontsize=14)), 
+                      xmin = 36.2, xmax = 36.2, ymin = -4.1, ymax = -4.1)
+
+
+# Code to override clipping
+gt <- ggplot_gtable(ggplot_build(newplot))
+gt$layout$clip[gt$layout$name == "panel"] <- "off"
+grid.draw(gt)
+
+dev.off()
+```
+
+# Figure 3
+Caption:
+
+    Overlap between genome-wide significant AD risk variants and DNase hypersensitivity sites from the consolidated set of macrophage samples, data from the BLUEPRINT Epigenome project. Grey histogram bars are the distribution of overlap from the 10,000 background matched SNP sets. The vertical black line is the number of overlapping loci from the AD risk variants set. 
+
+Histogram with x-axis the number of overlapping loci.
+
+
+Input for the histogram is 
+SNP_set N
+
+```{r}
+setwd("/Users/katherine/Documents/Data_Clinic_Work/Matthew_Hill/microgilia/consolidated_data/")
+
+consolidate_micro <- read.table("Glass2017_ATAC_mrgd_blrm_noext_sorted_locus_results.txt")
+
+consolidate_micro1 <-  consolidate_micro %>%
+        group_by(V3) %>%
+        dplyr::summarise(n = n()) %>%
+        ungroup() %>%
+        complete(V3 = seq(from = 1, to = 10001, by = 1), fill = list(n = 0) ) %>%
+        mutate(snp_set = ifelse(V3 == 1, 1, 2)) %>%
+        select(-V3)
+
+consolidate_macro <- read.table("all_mac_dnase_not_cut_merged_sorted_locus_results.txt")
+
+consolidate_macro1 <-  consolidate_macro %>%
+        group_by(V3) %>%
+        dplyr::summarise(n = n()) %>%
+        ungroup() %>%
+        complete(V3 = seq(from = 1, to = 10001, by = 1), fill = list(n = 0) ) %>%
+        mutate(snp_set = ifelse(V3 == 1, 1, 2)) %>%
+        select(-V3)
+
+
+hist_micro = ggplot(filter(consolidate_micro1, snp_set == 2), aes(x=n)) +
+    geom_histogram(binwidth=1, colour="black", fill="grey") +
+	xlab("Number of overlapping loci") +
+	ylab("Count") +
+	scale_y_continuous(expand = c(0,0)) +
+	scale_x_continuous (expand = c(0,0), limits = c(-1, 14), breaks = seq(0, 14, by = 2)) +
+	geom_vline(xintercept = as.numeric(select(filter(consolidate_micro1, snp_set == 1), n)) , size = 2) +
+	#geom_text(x = 10, y = 2000, label = "z score = 5.32", size = 8)+
+	#theme_bw()
+    ggtitle("Microglia") +
+    theme(
+	   	    #axis.title.x = element_text(family = "Arial Unicode MS", size = rel(2), vjust = (-0.5)),
+	   	    #axis.title.y = element_text(family = "Arial Unicode MS", size = rel(2),vjust = (1.2), angle = 90 , margin=margin(0,20,0,0)),
+	   	    #axis.text = element_text(family = "Arial Unicode MS", colour = "black",size = rel(1.7)),
+	   	    panel.grid.major = element_blank(),
+	   	    panel.grid.minor = element_blank(),
+	   	    panel.background = element_blank(),
+	   	    axis.line.x = element_line(color="black"),
+	   	    axis.line.y = element_line(color="black"),  
+            plot.margin = unit(c(0.5,0.5,0.5,0.5), "cm"))
+
+hist_macro = ggplot(filter(consolidate_macro1, snp_set == 2), aes(x=n)) +
+    geom_histogram(binwidth=1, colour="black", fill="grey") +
+	xlab("Number of overlapping loci") +
+	ylab("Count") +
+	scale_y_continuous(expand = c(0,0)) +
+	scale_x_continuous (expand = c(0,0), limits = c(-1, 14), breaks = seq(0, 14, by = 2)) +
+	geom_vline(xintercept = as.numeric(select(filter(consolidate_macro1, snp_set == 1), n)), size =2) +
+	#geom_text(x = 10, y = 2000, label = "z score = 5.32", size = 8)+
+	#theme_bw() 
+    ggtitle("Macrophage") +
+    theme(
+	   	    #axis.title.x = element_text(family = "Arial Unicode MS", size = rel(2), vjust = (-0.5)),
+	   	    #axis.title.y = element_text(family = "Arial Unicode MS", size = rel(2),vjust = (1.2), angle = 90 , margin=margin(0,20,0,0)),
+	   	    #axis.text = element_text(family = "Arial Unicode MS", colour = "black",size = rel(1.7)),
+	   	    panel.grid.major = element_blank(),
+	   	    panel.grid.minor = element_blank(),
+	   	    panel.background = element_blank(),
+	   	    axis.line.x = element_line(color="black"),
+	   	    axis.line.y = element_line(color="black"),  
+            plot.margin = unit(c(0.5,0.5,0.5,0.5), "cm"))
+
+
+tiff('Figure3.tiff', width=12, height = 6, units = 'in', res = 300, compression = 'lzw')
+    plot_grid(hist_macro, hist_micro, labels = c('A', 'B'))
+dev.off()
+
+
+
+```
+
+# Figure 4
+Caption:
+
+    Overlap between genome-wide significant AD risk variants and transcription factor motif containing DNase hypersensitivity sites from the consolidated macrophage data. AD risk variants and 10,000 sets of matched SNPs were intersected with 15 transcription factor motif containing DNase hypersensitivity sets and one no motif containing set. X axis is the z-score and the Y axis is the transcription factor motif. Box plots indicate the distribution of overlap from the 10,000 background matched SNP sets. Red circles are the z scores for the AD risk variants set . P values were calculated from the observed overlap of the 10,000 background matched sets. P values have been corrected for 16 tests ** P < 0.005, * P < 0.05. 
+
+Box plot with x-axis is z-scores and y-axis is motif set.
+
+## get data into corrrect format
+
+Need to calculate a zscore for each snp set for the individual donor microglia data.
+```{r}
+setwd("/Users/katherine/Documents/Data_Clinic_Work/Matthew_Hill/microgilia/enrichment_TF/")
+
+filenames <- list.files(pattern=glob2rx("*_matt_sorted_locus_results.txt"))
+TF <- list()
+
+for (i in 1:length(filenames)) {
+    TF[[i]] <- read.table(filenames[i])
+}
+
+TF2 <- list()
+
+for (i in 1:length(TF)) {
+    TF2[[i]] <- TF[[i]]  %>%
+        group_by(V3) %>%
+        dplyr::summarise(n = n()) %>%
+        ungroup() %>%
+        complete(V3 = seq(from = 1, to = 10001, by = 1), fill = list(n = 0) ) %>%
+        mutate(snp_set = ifelse(V3 == 1, 1, 2)) %>%
+        mutate(zscore = ( n - mean(n) ) / sd(n)) %>%
+        filter(snp_set == 2) %>%
+        select(snp_set, zscore)
+}
+
+TF1 <- list()
+for (i in 1:length(TF)) {
+    TF1[[i]] <- TF[[i]]  %>%
+        group_by(V3) %>%
+        dplyr::summarise(n = n()) %>%
+        ungroup() %>%
+        complete(V3 = seq(from = 1, to = 10001, by = 1), fill = list(n = 0) ) %>%
+        mutate(snp_set = ifelse(V3 == 1, 1, 2)) %>%
+        group_by(snp_set) %>%
+        dplyr::summarise(mean1 = mean(n, na.rm=TRUE),
+                  sd1 = sd(n, na.rm = TRUE) )  %>%
+        mutate(zscore = (mean1 - lead(mean1)) / lead(sd1)) %>%
+        filter(snp_set == 1) %>%
+        select(snp_set, zscore) 
+}
+
+names(TF1) <- sapply(strsplit(filenames,"_"), `[`, 1)
+names(TF2) <- sapply(strsplit(filenames,"_"), `[`, 1)
+
+TF1 <- ldply(TF1)
+TF2 <- ldply(TF2)
+
+names(TF1) <-  c("tf_name", "snp_set", "z_score")
+names(TF2) <-  c("tf_name", "snp_set", "z_score")
+
+TF_results <- full_join(TF1, TF2)
+TF_results <- filter(TF_results, tf_name != "DCE")
+
+TF_results$tf_name <- revalue(TF_results$tf_name, c("Sfpi1" = "PU.1", "TFs" = "None", "Mef2a" = "MEF2A", "Bcell" = "PU.1-IRF"))
+
+```
+
+```{r}
+data_snp_set_1 = subset(TF_results, snp_set == 1)
+data_snp_set_1_ordered = data_snp_set_1[order(data_snp_set_1$z_score),]
+data_snp_set_other = subset(TF_results, snp_set != 1)
+
+data_snp_set_1_ordered$label <- paste(data_snp_set_1_ordered$tf_name, 
+                              sprintf("%.3f", round(data_snp_set_1_ordered$z_score, digits=3)), sep = "    ")
+data_snp_set_1_sub <- select(data_snp_set_1_ordered, tf_name, z_score)
+
+bad <- inner_join(data_snp_set_1_sub, data_snp_set_other, by="tf_name")
+
+offset = 0.25
+
+#####################
+ADplot <- ggplot(data = bad,
+                 aes(x = reorder(tf_name, z_score.x),
+                     y = z_score.y
+                     ) ) +
+    stat_boxplot(geom = 'errorbar',
+                 width = 0.25) +
+    geom_boxplot(width = 0.25,
+                 outlier.shape = NA) +
+    geom_point(data = data_snp_set_1_ordered,
+               aes(x= tf_name,
+                   y = z_score),
+               colour = "red",
+               size = 1,
+               show.legend = FALSE) +
+    ylab("Z score") +
+    xlab("Motif set") +
+    guides(fill = guide_legend(title = NULL)) +
+	annotate("text", x = 19, y = data_snp_set_1_ordered[19,"z_score"] + offset, label = "**", size = 3) +
+	annotate("text", x = 18, y = data_snp_set_1_ordered[18,"z_score"] + offset, label = "**", size = 3) +
+	annotate("text", x = 16, y = data_snp_set_1_ordered[16,"z_score"] + offset, label = "*", size = 3) +
+    coord_flip() +
+	scale_x_discrete(labels = data_snp_set_1_ordered$label) +
+    ylim(-3, 7) +
+    #ggtitle("Microglia") +
+    theme(axis.line.x = element_line(color = "black", size = 0.5),
+          axis.line.y = element_line(color = "black", size = 0.5),
+          panel.background = element_blank(),
+          #axis.title.x = element_text(size = rel(1.2)),
+          #axis.title.y = element_text(size = rel(1.2)),
+          #legend.text=element_text(size= rel(1.25)),
+          #axis.text.x  = element_text(size=rel(0.8), color = "black"),
+          axis.text.y  = element_text(size=rel(0.8), color = "black"),
+          plot.margin=unit(c(1,0.5,0.5,0.5), "cm")
+    )
+
+
+# Create the textGrobs
+newplot = ADplot +
+    annotation_custom(grob = textGrob(label = "z-score", hjust = 0, gp = gpar(fontsize=8)), 
+                      xmin = 20, xmax = 20, ymin = -4.5, ymax = -4.5)
+
+
+# Code to override clipping
+TF_micro <- ggplot_gtable(ggplot_build(newplot))
+TF_micro$layout$clip[TF_micro$layout$name == "panel"] <- "off"
+
+
+```
+
+
+
+## Macrophage
+
+```{r}
+data <- read.table('/Users/katherine/Dropbox/AD_SNP_enrichment/data_and_code/tf_mac_all_for_R.txt', header=TRUE)
+
+data$tf_name <- revalue(data$tf_name, c("SPI1" = "PU.1"))
+
+data_snp_set_1 = subset(data, snp_set == 1)
+data_snp_set_1_ordered = data_snp_set_1[order(data_snp_set_1$z_score),]
+data_snp_set_other = subset(data, snp_set != 1)
+
+data_snp_set_1_ordered$label <- paste(data_snp_set_1_ordered$tf_name, 
+                              sprintf("%.3f", round(data_snp_set_1_ordered$z_score, digits=3)), sep = "    ")
+
+data_snp_set_1_sub <- select(data_snp_set_1_ordered, tf_name, z_score)
+
+bad <- inner_join(data_snp_set_1_sub, data_snp_set_other, by="tf_name")
+
+offset = 0.25
+
+#####################
+ADplot <- ggplot(data = bad,
+                 aes(x = reorder(tf_name, z_score.x),
+                     y = z_score.y
+                     ) ) +
+    stat_boxplot(geom = 'errorbar',
+                 width = 0.25) +
+    geom_boxplot(width = 0.25,
+                 outlier.shape = NA) +
+    geom_point(data = data_snp_set_1_ordered,
+               aes(x= tf_name,
+                   y = z_score),
+               colour = "red",
+               size = 1,
+               show.legend = FALSE) +
+    ylab("Z score") +
+    xlab("Motif set") +
+    guides(fill = guide_legend(title = NULL)) +
+	annotate("text", x = 13, y = data_snp_set_1_ordered[13,"z_score"] + offset, label = "**", size = 3) +
+	annotate("text", x = 12, y = data_snp_set_1_ordered[12,"z_score"] + offset, label = "**", size = 3) +
+	annotate("text", x = 11, y = data_snp_set_1_ordered[11,"z_score"] + offset, label = "*", size = 3) +
+	annotate("text", x = 10, y = data_snp_set_1_ordered[10,"z_score"] + offset, label = "*", size = 3) +
+    coord_flip() +
+	scale_x_discrete(labels = data_snp_set_1_ordered$label) +
+    ylim(-3, 7) +
+    #ggtitle("Macrophage") +
+    theme(axis.line.x = element_line(color = "black", size = 0.5),
+          axis.line.y = element_line(color = "black", size = 0.5),
+          panel.background = element_blank(),
+          #axis.title.x = element_text(size = rel(1.2)),
+          #axis.title.y = element_text(size = rel(1.2)),
+          #legend.text=element_text(size= rel(1.25)),
+          #axis.text.x  = element_text(size=rel(0.8), color = "black"),
+          axis.text.y  = element_text(size=rel(0.8), color = "black"),
+          plot.margin=unit(c(1,0.5,0.5,0.5), "cm")
+    )
+
+
+# Create the textGrobs
+newplot = ADplot + 
+    annotation_custom(grob = textGrob(label = "z-score", hjust = 0, gp = gpar(fontsize=8)), 
+                      xmin = 13.8, xmax = 13.8, ymin = -4.5, ymax = -4.5)
+
+
+# Code to override clipping
+TF_macro <- ggplot_gtable(ggplot_build(newplot))
+TF_macro$layout$clip[TF_macro$layout$name == "panel"] <- "off"
+
+
+```
+
+```{r}
+tiff('Figure4.tiff', width=12, height = 6, units = 'in', res = 300, compression = 'lzw')
+    plot_grid(TF_macro, TF_micro, ncol=2, labels = c('A            Macrophage', 'B            Microglia'))
+dev.off()
+```
+
+# Supplementary Figure 2
+Results from the SPI1 chip AD GWAS enrichment. 
+
+```{r}
+setwd("/Users/katherine/Documents/Data_Clinic_Work/Matthew_Hill/microgilia/SPI1_chip_enrichment/")
+
+spi1 <- read.table("SP1_narrowPeak_blkRemoved_merged_sorted_locus_results.txt")
+
+spi1_histo <-  spi1 %>%
+        group_by(V3) %>%
+        dplyr::summarise(n = n()) %>%
+        ungroup() %>%
+        complete(V3 = seq(from = 1, to = 10001, by = 1), fill = list(n = 0) ) %>%
+        mutate(snp_set = ifelse(V3 == 1, 1, 2)) %>%
+        select(-V3)
+
+tiff("Supplementary_Figure_2.tiff", height = 10, width = 20, units = 'cm', 
+     compression = "lzw", res = 300)
+
+ggplot(filter(spi1_histo, snp_set == 2), aes(x=n)) +
+    geom_histogram(binwidth=1, colour="black", fill="grey") +
+	xlab("Number of overlapping loci") +
+	ylab("Count") +
+	scale_y_continuous(expand = c(0,0)) +
+	scale_x_continuous (expand = c(0,0), limits = c(-1, 8), breaks = seq(0, 8, by = 2)) +
+	geom_vline(xintercept = as.numeric(select(filter(spi1_histo, snp_set == 1), n)) , size = 2) +
+	#geom_text(x = 10, y = 2000, label = "z score = 5.32", size = 8)+
+	#theme_bw()
+    ggtitle("Enrichment of genome-wide significant AD risk loci in Microglia SPI1 ChIP-seq peaks") +
+    theme(
+	   	    #axis.title.x = element_text(family = "Arial Unicode MS", size = rel(2), vjust = (-0.5)),
+	   	    #axis.title.y = element_text(family = "Arial Unicode MS", size = rel(2),vjust = (1.2), angle = 90 , margin=margin(0,20,0,0)),
+	   	    #axis.text = element_text(family = "Arial Unicode MS", colour = "black",size = rel(1.7)),
+	   	    panel.grid.major = element_blank(),
+	   	    panel.grid.minor = element_blank(),
+	   	    panel.background = element_blank(),
+	   	    axis.line.x = element_line(color="black"),
+	   	    axis.line.y = element_line(color="black"),  
+            plot.margin = unit(c(0.5,0.5,0.5,0.5), "cm"))
+
+dev.off()
+
+```
